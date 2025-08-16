@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>طقس عواصم العالم</title>
+  <style>
+    :root {
+      --bg: #0f172a; /* slate-900 */
+      --card: #111827; /* gray-900 */
+      --muted: #94a3b8; /* slate-400 */
+      --text: #e5e7eb; /* gray-200 */
+      --accent: #22d3ee; /* cyan-400 */
+      --ok: #22c55e; /* green-500 */
+      --warn: #f59e0b; /* amber-500 */
+      --bad: #ef4444; /* red-500 */
+      --shadow: rgba(0,0,0,.25);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans Arabic, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: radial-gradient(1200px 600px at 80% -10%, #172554 0%, transparent 60%),
+                  radial-gradient(800px 400px at -20% 10%, #0e7490 0%, transparent 60%),
+                  var(--bg);
+      color: var(--text);
+    }
+    header {
+      position: sticky; top: 0; z-index: 10;
+      backdrop-filter: blur(8px);
+      background: rgba(15, 23, 42, .6);
+      border-bottom: 1px solid rgba(148,163,184,.2);
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 18px; }
+    h1 { margin: 0 0 10px; font-size: 28px; letter-spacing: .5px; }
+    .controls { display: grid; grid-template-columns: 1fr 140px 160px 120px; gap: 10px; }
+    .controls > * { height: 44px; border-radius: 14px; border: 1px solid rgba(148,163,184,.25); background: rgba(17,24,39,.7); color: var(--text); padding: 0 12px; box-shadow: 0 6px 20px var(--shadow) inset; }
+    .controls input::placeholder { color: var(--muted); }
+    .btn { cursor: pointer; transition: .2s ease; }
+    .btn:hover { transform: translateY(-1px); }
+    .pill {
+      display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px;
+      background: rgba(148,163,184,.15); color: var(--text); font-size: 12px; border: 1px solid rgba(148,163,184,.25);
+    }
+    #summary { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+    #grid { display: grid; grid-template-columns: repeat( auto-fill, minmax(260px, 1fr) ); gap: 14px; padding: 18px 0 38px; }
+    .card { background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.005)); border: 1px solid rgba(148,163,184,.22); border-radius: 18px; padding: 14px; box-shadow: 0 8px 24px var(--shadow); position: relative; overflow: hidden; }
+    .card .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .city { font-size: 18px; font-weight: 700; line-height: 1.2; }
+    .country { color: var(--muted); font-size: 13px; }
+    .temp { font-size: 40px; font-weight: 800; letter-spacing: .5px; }
+    .desc { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .meta { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .skeleton { background: linear-gradient(90deg, rgba(255,255,255,.06), rgba(255,255,255,.02), rgba(255,255,255,.06)); background-size: 200% 100%; animation: shimmer 1.2s infinite; border-radius: 10px; }
+    .sk-line { height: 16px; width: 60%; }
+    .sk-temp { height: 44px; width: 120px; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px 0 30px; }
+    @media (max-width: 720px) { .controls { grid-template-columns: 1fr 1fr; grid-auto-rows: 44px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>🌍 طقس عواصم العالم</h1>
+      <div class="controls">
+        <input id="search" type="search" placeholder="ابحث باسم العاصمة أو الدولة…" />
+        <select id="sort">
+          <option value="name">الاسم (أ-ي)</option>
+          <option value="temp-desc">درجة الحرارة ↓</option>
+          <option value="temp-asc">درجة الحرارة ↑</option>
+          <option value="region">القارة</option>
+        </select>
+        <select id="unit">
+          <option value="C">°C مئوي</option>
+          <option value="F">°F فهرنهايت</option>
+        </select>
+        <button id="refresh" class="btn">تحديث البيانات ↻</button>
+      </div>
+      <div id="summary"></div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="grid"></div>
+  </main>
+
+  <footer>
+    يعتمد هذا التطبيق على <span class="pill">REST Countries</span> و <span class="pill">Open‑Meteo</span> بدون مفتاح API.
+  </footer>
+
+  <script>
+    // ————— Helpers —————
+    const $ = (sel, root=document) => root.querySelector(sel);
+    const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+    const fmt = new Intl.NumberFormat('ar-EG');
+    const DEG = (v, unit) => unit==='C' ? `${Math.round(v)}°` : `${Math.round(v*9/5+32)}°`;
+
+    const WEATHER_CODE = {
+      0: 'سماء صافية', 1: 'غالبًا صافية', 2: 'غائمة جزئيًا', 3: 'غائمة',
+      45: 'ضباب', 48: 'ضباب متجمد', 51: 'رذاذ خفيف', 53: 'رذاذ معتدل', 55: 'رذاذ كثيف',
+      56: 'رذاذ متجمد خفيف', 57: 'رذاذ متجمد كثيف', 61: 'أمطار خفيفة', 63: 'أمطار متوسطة', 65: 'أمطار غزيرة',
+      66: 'مطر متجمد خفيف', 67: 'مطر متجمد كثيف', 71: 'ثلوج خفيفة', 73: 'ثلوج متوسطة', 75: 'ثلوج كثيفة',
+      77: 'حبيبات جليدية', 80: 'زخات خفيفة', 81: 'زخات متوسطة', 82: 'زخات غزيرة',
+      85: 'زخات ثلجية خفيفة', 86: 'زخات ثلجية غزيرة', 95: 'عواصف رعدية', 96: 'عواصف مع برد خفيف', 97: 'عواصف مع برد شديد'
+    };
+
+    let STATE = {
+      unit: 'C',
+      sort: 'name',
+      search: '',
+      capitals: [], // {id, country, capital, region, lat, lon, code, tempC, wind, humidity}
+      loading: new Map()
+    };
+
+    async function fetchCountries() {
+      const url = 'https://restcountries.com/v3.1/all?fields=name,capital,capitalInfo,cca2,region';
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('تعذر تحميل قائمة الدول');
+      const data = await res.json();
+      const items = [];
+      for (const c of data) {
+        if (!Array.isArray(c.capital) || c.capital.length === 0) continue;
+        const cap = c.capital[0];
+        const info = c.capitalInfo && Array.isArray(c.capitalInfo.latlng) ? c.capitalInfo.latlng : null;
+        if (!info) continue; // بعض الدول لا توفر إحداثيات العاصمة
+        const [lat, lon] = info; // lat, lon
+        const id = `${c.cca2}-${cap}`;
+        items.push({ id, country: c.name?.common || '—', capital: cap, region: c.region || 'غير معروف', lat, lon });
+      }
+      return items.sort((a,b)=> a.capital.localeCompare(b.capital, 'ar'));
+    }
+
+    async function fetchWeatherFor(cap) {
+      const url = new URL('https://api.open-meteo.com/v1/forecast');
+      url.searchParams.set('latitude', cap.lat);
+      url.searchParams.set('longitude', cap.lon);
+      url.searchParams.set('current', 'temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code');
+      url.searchParams.set('timezone', 'auto');
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('فشل تحميل الطقس');
+      const data = await res.json();
+      const cur = data.current || {};
+      cap.tempC = typeof cur.temperature_2m === 'number' ? cur.temperature_2m : null;
+      cap.humidity = cur.relative_humidity_2m ?? null;
+      cap.wind = cur.wind_speed_10m ?? null;
+      cap.code = cur.weather_code ?? null;
+      return cap;
+    }
+
+    function cardSkeleton(cap){
+      return `
+        <article class="card" id="card-${cap.id}">
+          <div class="row">
+            <div>
+              <div class="city">${cap.capital}</div>
+              <div class="country">${cap.country} • ${cap.region}</div>
+            </div>
+            <span class="pill">تحميل…</span>
+          </div>
+          <div class="temp skeleton sk-temp" style="margin-top:6px"></div>
+          <div class="desc skeleton sk-line" style="margin-top:6px"></div>
+          <div class="meta" style="margin-top:8px">
+            <span class="pill skeleton" style="width:90px;height:24px"></span>
+            <span class="pill skeleton" style="width:100px;height:24px"></span>
+          </div>
+        </article>`;
+    }
+
+    function renderCard(cap) {
+      const el = $(`#card-${cap.id}`);
+      if (!el) return;
+      const status = cap.tempC==null ? '<span class="pill" style="background: rgba(239,68,68,.15); border-color: rgba(239,68,68,.35)">لا تتوفر بيانات</span>' : '';
+      const temp = cap.tempC==null ? '—' : DEG(cap.tempC, STATE.unit);
+      const desc = cap.code!=null ? (WEATHER_CODE[cap.code] || '—') : '—';
+      const wind = cap.wind!=null ? `${Math.round(cap.wind)} م/ث` : '—';
+      const hum = cap.humidity!=null ? `${Math.round(cap.humidity)}٪ رطوبة` : '—';
+      el.innerHTML = `
+        <div class="row">
+          <div>
+            <div class="city">${cap.capital}</div>
+            <div class="country">${cap.country} • ${cap.region}</div>
+          </div>
+          ${status}
+        </div>
+        <div class="temp">${temp}</div>
+        <div class="desc">${desc}</div>
+        <div class="meta">
+          <span class="pill">💨 ${wind}</span>
+          <span class="pill">💧 ${hum}</span>
+          <span class="pill">📍 ${cap.lat.toFixed(2)}, ${cap.lon.toFixed(2)}</span>
+        </div>`;
+    }
+
+    function renderAll() {
+      const grid = $('#grid');
+      const term = STATE.search.trim().toLowerCase();
+      let list = STATE.capitals;
+      if (term) {
+        list = list.filter(c => (c.capital+" "+c.country+" "+c.region).toLowerCase().includes(term));
+      }
+      if (STATE.sort === 'name') list.sort((a,b)=> a.capital.localeCompare(b.capital, 'ar'));
+      if (STATE.sort === 'region') list.sort((a,b)=> a.region.localeCompare(b.region, 'ar') || a.capital.localeCompare(b.capital, 'ar'));
+      if (STATE.sort === 'temp-desc') list.sort((a,b)=> (b.tempC ?? -999) - (a.tempC ?? -999));
+      if (STATE.sort === 'temp-asc') list.sort((a,b)=> (a.tempC ?? 999) - (b.tempC ?? 999));
+
+      $('#summary').innerHTML = `
+        <span class="pill">العواصم: ${fmt.format(STATE.capitals.length)}</span>
+        <span class="pill">المعروضة: ${fmt.format(list.length)}</span>
+        <span class="pill">الوحدة: ${STATE.unit === 'C' ? 'مئوي' : 'فهرنهايت'}</span>`;
+
+      grid.innerHTML = list.map(cardSkeleton).join('');
+      // After skeletons are placed, render data for those already loaded
+      for (const c of list) renderCard(c);
+    }
+
+    async function hydrateWeather(batch=40) {
+      // Progressive loading in batches to keep UI responsive
+      const queue = [...STATE.capitals];
+      let i = 0;
+      while (queue.length) {
+        const chunk = queue.splice(0, batch);
+        await Promise.all(chunk.map(async cap => {
+          if (STATE.loading.has(cap.id)) return; // already fetched
+          STATE.loading.set(cap.id, true);
+          try { await fetchWeatherFor(cap); } catch (e) { /* ignore */ }
+          renderCard(cap);
+        }));
+        i += chunk.length;
+      }
+    }
+
+    async function init() {
+      $('#grid').innerHTML = '<p class="pill">جاري تحميل قائمة العواصم…</p>';
+      try {
+        STATE.capitals = await fetchCountries();
+      } catch (e) {
+        $('#grid').innerHTML = `<p class="pill" style="background: rgba(239,68,68,.15); border-color: rgba(239,68,68,.35)">حدث خطأ أثناء التحميل: ${e.message}</p>`;
+        return;
+      }
+      renderAll();
+      hydrateWeather(30);
+    }
+
+    // ————— Events —————
+    $('#search').addEventListener('input', (e)=>{ STATE.search = e.target.value; renderAll(); });
+    $('#sort').addEventListener('change', (e)=>{ STATE.sort = e.target.value; renderAll(); });
+    $('#unit').addEventListener('change', (e)=>{ STATE.unit = e.target.value; renderAll(); });
+    $('#refresh').addEventListener('click', ()=>{ STATE.loading.clear(); hydrateWeather(30); });
+
+    // Kickoff
+    init();
+  </script>
+</body>
+</html>
